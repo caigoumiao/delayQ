@@ -3,13 +3,12 @@ package delayQ
 import (
 	"errors"
 	"github.com/caigoumiao/cronSchedule"
-	"github.com/go-redis/redis"
 )
 
 type DelayQ struct {
 	scheduler          *cronSchedule.Scheduler
 	jobExecutorFactory map[string]*jobExecutor
-	redisCli           *redis.Client
+	redisCli           *redisClient
 }
 
 var (
@@ -21,6 +20,8 @@ var (
 
 func initDelayQ(conf DelayQConf) *DelayQ {
 	dq := new(DelayQ)
+	// 检查配置
+	checkConf(conf)
 	// 初始化定时任务调度器
 	sche := cronSchedule.New()
 	sche.Register([]int{}, 1, DelayQCronJob{})
@@ -30,6 +31,18 @@ func initDelayQ(conf DelayQConf) *DelayQ {
 	// 初始化redis
 	dq.redisCli = getRedisCli(conf.Redis)
 	return dq
+}
+
+// 检查配置
+// 目前就是检查必填项，非必填项补充为默认值
+// todo: 写法不好👎
+func checkConf(conf DelayQConf) {
+	if conf.Redis.KeyPrefix == "" {
+		conf.Redis.KeyPrefix = defaultDelayQKeyPrefix
+	}
+	if conf.Redis.ZSetBatchLimit == 0 {
+		conf.Redis.ZSetBatchLimit = 1000
+	}
 }
 
 func New(conf DelayQConf) *DelayQ {
@@ -59,8 +72,17 @@ func (dq *DelayQ) Register(action JobBaseAction) error {
 }
 
 // 往队列添加延迟任务
-func (*DelayQ) AddDelay(job DelayJobMsg) error {
-	return nil
+func (dq *DelayQ) AddDelay(job DelayJobMsg) error {
+	return dq.redisCli.ZAdd(job)
+}
+
+// 获取所有可用的jobId
+func (dq *DelayQ) availableJobIDs() []string {
+	var IDs []string
+	for k, _ := range dq.jobExecutorFactory {
+		IDs = append(IDs, k)
+	}
+	return IDs
 }
 
 // 延迟队列的配置项
@@ -76,6 +98,12 @@ type (
 
 		// 端口号（*）
 		Port int
+
+		// 如果不设置，则默认为delayQ
+		KeyPrefix string
+
+		// ZSet批量限制的条数，默认为1000
+		ZSetBatchLimit int64
 	}
 )
 
@@ -88,8 +116,8 @@ func (DelayQCronJob) Name() string {
 }
 
 func (DelayQCronJob) Process() error {
-
-	return nil
+	IDs := delayQ.availableJobIDs()
+	return delayQ.redisCli.BatchHandle(IDs)
 }
 
 func (DelayQCronJob) IfActive() bool {

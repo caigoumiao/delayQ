@@ -104,7 +104,7 @@ func initRedis(conf RedisConf) {
 
 	// 2. 检查是否可以访问（ping）
 	if err := checkRedis(client); err != nil {
-		fmt.Println(err.Error())
+		delayQ.logger.ErrorF("DelayQ failed to init redis err=%s", err.Error())
 		panic("failed to connect to redis")
 	}
 	redisCli = &redisClient{
@@ -112,6 +112,7 @@ func initRedis(conf RedisConf) {
 		batchLimit: conf.ZSetBatchLimit,
 		conn:       client,
 	}
+	delayQ.logger.InfoF("DelayQ init redis OK!")
 }
 
 func checkRedis(c *redis.Client) error {

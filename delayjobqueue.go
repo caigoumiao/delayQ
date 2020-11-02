@@ -6,9 +6,17 @@ import (
 )
 
 type DelayQ struct {
-	scheduler          *cronSchedule.Scheduler
+	// 定时任务调度器
+	scheduler *cronSchedule.Scheduler
+
+	// 延时任务执行器工厂
 	jobExecutorFactory map[string]*jobExecutor
-	redisCli           *redisClient
+
+	// redis客户端
+	redisCli *redisClient
+
+	// 支持日志自定义
+	logger Logger
 }
 
 var (
@@ -18,19 +26,21 @@ var (
 	ErrorsDelayQRegisterIDDuplicate = errors.New("your job id has been used")
 )
 
-func initDelayQ(conf DelayQConf) *DelayQ {
-	dq := new(DelayQ)
+func initDelayQ(conf DelayQConf) {
+	delayQ = new(DelayQ)
 	// 检查配置
 	checkConf(conf)
+	// 初始化Logger
+	delayQ.logger = defaultLogger
 	// 初始化定时任务调度器
 	sche := cronSchedule.New()
 	sche.Register([]int{}, 1, DelayQCronJob{})
-	dq.scheduler = sche
+	delayQ.scheduler = sche
 	// 初始化任务执行器工厂
-	dq.jobExecutorFactory = make(map[string]*jobExecutor)
+	delayQ.jobExecutorFactory = make(map[string]*jobExecutor)
 	// 初始化redis
-	dq.redisCli = getRedisCli(conf.Redis)
-	return dq
+	delayQ.redisCli = getRedisCli(conf.Redis)
+	delayQ.logger.InfoF("Initialization of DelayQ completed......")
 }
 
 // 检查配置
@@ -55,18 +65,21 @@ func New(conf DelayQConf) *DelayQ {
 // 启动延迟队列后台
 func (dq *DelayQ) StartBackground() {
 	dq.scheduler.Start()
+	dq.logger.InfoF("DelayQ start background......")
 }
 
 // 注册任务执行器
 func (dq *DelayQ) Register(action JobBaseAction) error {
 	jobID := action.ID()
 	if _, ok := dq.jobExecutorFactory[jobID]; ok {
+		dq.logger.ErrorF("DelayQ register job[ID=%s] err=%v", action.ID(), ErrorsDelayQRegisterIDDuplicate)
 		return ErrorsDelayQRegisterIDDuplicate
 	} else {
 		dq.jobExecutorFactory[jobID] = &jobExecutor{
 			ID:     jobID,
 			action: action,
 		}
+		dq.logger.InfoF("DelayQ register job[ID=%s]", jobID)
 	}
 	return nil
 }
@@ -83,6 +96,11 @@ func (dq *DelayQ) availableJobIDs() []string {
 		IDs = append(IDs, k)
 	}
 	return IDs
+}
+
+// 自定义Logger
+func (dq *DelayQ) SetLogger(logger Logger) {
+	dq.logger = logger
 }
 
 // 延迟队列的配置项

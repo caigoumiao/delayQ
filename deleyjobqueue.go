@@ -7,7 +7,7 @@ type JobBaseAction interface {
 	ID() string
 
 	// 任务的执行体
-	Execute([]interface{}) error
+	Execute(args []interface{}) error
 }
 
 // 任务的执行器
